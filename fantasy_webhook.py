@@ -1,12 +1,12 @@
 import os
 import time
 import requests
-from datetime import datetime
+from datetime import datetime, timezone
 
 # --- Config from environment ---
 WEBHOOK_URL = os.getenv("WEBHOOK_URL")
-LEAGUE_ID = int(os.getenv("LEAGUE_ID", "284261"))  # default to your league
-SEASON_YEAR = int(os.getenv("SEASON_YEAR", "2025"))
+LEAGUE_ID = os.getenv("LEAGUE_ID", "284261")  # default to your league
+SEASON_YEAR = os.getenv("SEASON_YEAR", "2025")
 SWID = os.getenv("SWID")           # e.g., "{...}"
 ESPN_S2 = os.getenv("ESPN_S2")     # long token
 
@@ -19,16 +19,33 @@ if SWID and ESPN_S2:
 
 BASE_URL = f"https://fantasy.espn.com/apis/v3/games/ffl/seasons/{SEASON_YEAR}/segments/0/leagues/{LEAGUE_ID}"
 
-def fetch_json(url: str):
-    try:
-        resp = requests.get(url, cookies=COOKIES, timeout=10)
-        resp.raise_for_status()
-        return resp.json()
-    except Exception as e:
-        return {"_error": str(e)}
-
 def bold(text: str) -> str:
     return f"**{text}**"
+
+def fetch_json(url: str):
+    try:
+        print(f"🌐 Fetching: {url}")
+        resp = requests.get(url, cookies=COOKIES, timeout=10, allow_redirects=True)
+        print(f"🔍 HTTP status: {resp.status_code}")
+        print(f"📍 Final URL after redirects: {resp.url}")
+
+        # Detect redirect to ESPN fantasy landing page
+        if resp.url.startswith("https://www.espn.com/fantasy"):
+            print("⚠️ Redirected to ESPN fantasy landing page.")
+            print("💡 This usually means the league is private or cookies are invalid/expired.")
+            return {"_error": "Redirected to ESPN fantasy landing page — check SWID/ESPN_S2 or league privacy."}
+
+        resp.raise_for_status()
+        return resp.json()
+
+    except requests.exceptions.HTTPError as e:
+        if resp.status_code == 403:
+            print("❌ 403 Forbidden — ESPN blocked the request.")
+            print("💡 If your league is private, make sure SWID and ESPN_S2 are set and valid.")
+        return {"_error": str(e)}
+
+    except Exception as e:
+        return {"_error": str(e)}
 
 def build_team_map(teams):
     return {team.get("id"): team for team in teams}
@@ -102,7 +119,7 @@ def run_update():
 
     try:
         requests.post(WEBHOOK_URL, json={"content": msg}, timeout=10)
-        print(f"✅ Update sent at {datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')} UTC")
+        print(f"✅ Update sent at {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S')} UTC")
     except Exception as e:
         print(f"❌ Failed to post to Discord: {e}")
 
